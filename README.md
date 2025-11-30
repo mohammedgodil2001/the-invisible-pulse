@@ -11,6 +11,5 @@ The Invisible Pulse is an interactive installation that measures the electrical 
 * **Software:** TouchDesigner (Visuals), Ableton Live (Sound).
 * **Technique:** Projection Mapping, Generative Algorithms.
 
-## Work Plan (Agile)
-I am managing my tasks and timeline using the **GitHub Projects Board**.
+
 
