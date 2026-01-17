@@ -73,12 +73,27 @@ void sample() {
   }
 }
 
+void processChange(unsigned long delta, unsigned long averg, byte change) {
+  if (change) {
+    if (noteLEDs > 0) {
+      rampUp(random(0, LED_NUM), 255, 50);
+    }
+    Serial.println("╔═══════════════════════════════════════╗");
+    Serial.println("║            TOUCH DETECTED!            ║");
+    Serial.println("╚═══════════════════════════════════════╝");
+  }
+}
+
 void analyzeSample() {
   unsigned long averg = 0;
   unsigned long maxim = 0;
   unsigned long minim = 100000;
   float stdevi = 0;
   unsigned long delta = 0;
+
+  static float baseline = 0.0;
+  static bool isTouched = false;
+  static unsigned long touchStartTime = 0;
 
   if (index == samplesize) {
     unsigned long sampanalysis[analysize];
@@ -106,12 +121,61 @@ void analyzeSample() {
     
     delta = maxim - minim;
 
-    Serial.print("Delta: ");
-    Serial.print(delta);
-    Serial.print(" | Average: ");
-    Serial.print(averg);
-    Serial.print(" | StdDev: ");
-    Serial.println(stdevi);
+    // Initialize baseline on startup
+    if (baseline == 0) {
+      baseline = delta;
+    }
+
+    // Hysteresis thresholds
+    const float TOUCH_OFFSET = 45.0;
+    const float REL_OFFSET = 30.0;
+
+    if (!isTouched) {
+      // Drift compensation
+      baseline = (baseline * 0.95) + ((float)delta * 0.05);
+
+      // Touch detection
+      if (delta > (baseline + TOUCH_OFFSET)) {
+        isTouched = true;
+        touchStartTime = millis();
+        processChange(delta, averg, 1);
+      }
+    } else {
+      // Stuck protection
+      if (millis() - touchStartTime > 10000) {
+        Serial.println("!!! AUTO-RESET (Stuck Protection) !!!");
+        baseline = delta;
+        isTouched = false;
+        if (noteLEDs && LED_NUM > 0) {
+          rampUp(0, 0, 0);
+        }
+      }
+      // Release detection
+      else if (delta < (baseline + REL_OFFSET)) {
+        isTouched = false;
+      }
+    }
+
+    // Status monitoring
+    static unsigned long lastPrintTime = 0;
+    if ((millis() - lastPrintTime) > 100) {
+      if (isTouched) {
+        Serial.println("╔═══════════════════════════════════════╗");
+        Serial.println("║            TOUCHED!                   ║");
+        Serial.println("╚═══════════════════════════════════════╝");
+      }
+      Serial.print("Delta: ");
+      Serial.print(delta);
+      Serial.print(" | Base: ");
+      Serial.print((int)baseline);
+      Serial.print(" | Thresh: >");
+      if (isTouched)
+        Serial.println((int)(baseline + REL_OFFSET));
+      else
+        Serial.println((int)(baseline + TOUCH_OFFSET));
+
+      lastPrintTime = millis();
+    }
 
     index = 0;
   }
