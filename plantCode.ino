@@ -1,16 +1,11 @@
-// ===================================
-// PLANT BIODATA SENSOR
-// Interactive Projection Mapping
-// ===================================
-
-#include <Bounce2.h>
-#include <EEPROMex.h>
-#include <LEDFader.h>
+#include <Bounce2.h> // Bounce2 removes noise from button presses so one press is detected as one clean action.
+#include <EEPROMex.h> // EEPROMex stores data permanently on the Arduino, so the settings are not lost when the power is turned off.
+#include <LEDFader.h> // LEDFader allows LEDs to fade in and out smoothly without using delays or harsh ON/OFF switching.
 
 int maxBrightness = 190;
 const int scaleCount = 5;
-const int scaleLen = 13;
-int currScale = 0;
+const int scaleLen = 13; // maximum scale length plus 1 for 'used length'
+int currScale = 0;       // current scale, default Chrom
 int scale[scaleCount][scaleLen] = {
     {12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, // Chromatic
     {7, 1, 3, 5, 6, 8, 10, 12},                  // Major
@@ -19,60 +14,70 @@ int scale[scaleCount][scaleLen] = {
     {7, 1, 3, 4, 6, 8, 9, 11}                    // Minor
 };
 
-int root = 0;
+int root = 0; // initialize for root, pitch shifting
 
-const byte interruptPin = INT1;
-const byte knobPin = A0;
-Bounce button = Bounce();
-const byte buttonPin = A1;
-int menus = 5;
-int mode = 0;
+
+const byte interruptPin = INT1; // galvanometer input
+// const byte interruptPin = INT0; //galvanometer input
+const byte knobPin = A0;   // knob analog input
+Bounce button = Bounce();  // debounce button using Bounce2
+const byte buttonPin = A1; // tact button input
+int menus = 5;             // number of main menus
+int mode = 0;              // 0 = Threshold, 1 = Scale, 2 = Brightness
 int currMenu = 0;
-int pulseRate = 350;
+int pulseRate = 350; // base pulse rate
 
-const byte samplesize = 10;
-const byte analysize = samplesize - 1;
+const byte samplesize = 10;            // set sample array size
+const byte analysize = samplesize - 1; // trim for analysis array
 
-const byte polyphony = 5;
-int channel = 1;
-int noteMin = 36;
-int noteMax = 96;
-byte QY8 = 0;
-byte controlNumber = 80;
-byte controlVoltage = 1;
-long batteryLimit = 3000;
+const byte polyphony = 5; // above 8 notes may run out of ram
+int channel = 1; // setting channel to 11 or 12 often helps simply computer midi
+                 // routing setups
+int noteMin = 36; // C2  - keyboard note minimum
+int noteMax = 96; // C7  - keyboard note maximum
+byte QY8 = 0; // sends each note out chan 1-4, for use with General MIDI like
+              // Yamaha QY8 sequencer
+byte controlNumber = 80; // set to mappable control, low values may interfere
+                         // with other soft synth controls!!
+byte controlVoltage =
+    1; // output PWM CV on controlLED, pin 17, PB3, digital 11 *lowpass filter
+long batteryLimit = 3000; // voltage check minimum, 3.0~2.7V under load; causes
+                          // lightshow to turn off (save power)
 byte checkBat = 1;
 
 byte timeout = 0;
 int value = 0;
 int prevValue = 0;
 
-volatile unsigned long microseconds;
+volatile unsigned long microseconds; // sampling timer
 volatile byte index = 0;
 volatile unsigned long samples[samplesize];
 
-float threshold = 2.5;
+float threshold = 2.5; // Adjusted for lower noise floor
 
-float threshMin = 1.61;
-float threshMax = 3.71;
+float threshMin = 1.61; // scaling threshold min
+float threshMax = 3.71; // scaling threshold max
 float knobMin = 1;
 float knobMax = 1024;
 
 unsigned long previousMillis = 0;
 unsigned long currentMillis = 1;
-unsigned long lastPrintTime = 0;
-unsigned long batteryCheck = 0;
-unsigned long menuTimeout = 5000;
+unsigned long lastPrintTime = 0;  // Timer for slow idle printing
+unsigned long batteryCheck = 0;   // battery check delay timer
+unsigned long menuTimeout = 5000; // 5 seconds timeout in menu mode
 
 #define LED_NUM 6
 
-LEDFader leds[LED_NUM] = {LEDFader(3), LEDFader(6), LEDFader(10),
-                          LEDFader(5), LEDFader(9), LEDFader(11)};
+LEDFader leds[LED_NUM] = {LEDFader(3),  // Red
+                          LEDFader(6),  // Green
+                          LEDFader(10), // White
+                          LEDFader(5),  LEDFader(9), LEDFader(11)};
 int ledNums[LED_NUM] = {3, 6, 10, 5, 9, 11};
-byte controlLED = 5;
-byte noteLEDs = 1;
+byte controlLED = 5; // array index of control LED (CV out)
+byte noteLEDs = 1;   // performs lightshow set at noteOn event
 
-typedef struct _MIDImessage {
+typedef struct _MIDImessage { // build structure for Note and Control
+                              // MIDImessages
   unsigned int type;
   int value;
   int velocity;
@@ -80,44 +85,49 @@ typedef struct _MIDImessage {
   long period;
   int channel;
 } MIDImessage;
-MIDImessage noteArray[polyphony];
+MIDImessage noteArray[polyphony]; // manage MIDImessage data as an array with
+                                  // size polyphony
 int noteIndex = 0;
-MIDImessage controlMessage;
+MIDImessage
+    controlMessage; // manage MIDImessage data for Control Message (CV out)
 
 void setup() {
-  pinMode(knobPin, INPUT);
+  pinMode(knobPin, INPUT); // here we are setting up the knb and button to take theier vales and read it later
   pinMode(buttonPin, INPUT_PULLUP);
-  button.attach(buttonPin);
+  button.attach(buttonPin); // we are attaching the button to this library to make it less noisy
   button.interval(5);
-
-  randomSeed(analogRead(0));
-  Serial.begin(115200);
-
-  controlMessage.value = 0;
+  randomSeed(analogRead(0)); 
+  Serial.begin(115200); 
+  controlMessage.value = 0; // it is for MIDI
   if (noteLEDs)
-    bootLightshow();
-  attachInterrupt(interruptPin, sample, RISING);
+    bootLightshow(); // this function is for all the 5 leds to turn on when the arduino is connected to the computer
+  attachInterrupt(interruptPin, sample, RISING); // bcs of this arduino can catch all the signals from the 555 timer
 }
 
 void loop() {
-  currentMillis = millis();
+  currentMillis = millis(); 
+  // checkBattery(); //on low power, shutoff lightShow, continue MIDI operation
 
-  checkButton();
+  checkButton(); // its about to get really funky in here
 
   if (index >= samplesize) {
     analyzeSample();
-  }
-  checkNote();
-  checkControl();
-  checkLED();
+  } // if samples array full, also checked in analyzeSample(), call sample
+    // analysis
+  checkNote();    // turn off expired notes
+  checkControl(); // update control value
+  checkLED();     // LED management without delay()
 
   if (currMenu > 0)
-    checkMenu();
+    checkMenu(); // allow main loop by checking current menu mode, and updating
+                 // millis
 }
 
 void setNote(int value, int velocity, long duration, int notechannel) {
+  // find available note in array (velocity = 0);
   for (int i = 0; i < polyphony; i++) {
     if (!noteArray[i].velocity) {
+      // if velocity is 0, replace note in array
       noteArray[i].type = 0;
       noteArray[i].value = value;
       noteArray[i].velocity = velocity;
@@ -130,15 +140,16 @@ void setNote(int value, int velocity, long duration, int notechannel) {
         midiSerial(144, channel, value, velocity);
       }
 
-      if (noteLEDs == 1) {
-        for (byte j = 0; j < (LED_NUM - 1); j++) {
+      if (noteLEDs == 1) {                         // normal mode
+        for (byte j = 0; j < (LED_NUM - 1); j++) { // find available LED and set
           if (!leds[j].is_fading()) {
             rampUp(i, maxBrightness, duration);
             break;
           }
         }
-      } else if (noteLEDs == 2) {
-        for (byte j = 1; j < (LED_NUM - 1); j++) {
+      } else if (noteLEDs == 2) { // threshold special display mode
+        for (byte j = 1; j < (LED_NUM - 1);
+             j++) { // find available LED above first and set
           if (!leds[j].is_fading()) {
             rampUp(i, maxBrightness, duration);
             break;
@@ -156,22 +167,32 @@ void setControl(int type, int value, int velocity, long duration) {
   controlMessage.value = value;
   controlMessage.velocity = velocity;
   controlMessage.period = duration;
-  controlMessage.duration = currentMillis + duration;
+  controlMessage.duration =
+      currentMillis + duration; // schedule for update cycle
 }
 
 void checkControl() {
+  // need to make this a smooth slide transition, using high precision
+  // distance is current minus goal
   signed int distance = controlMessage.velocity - controlMessage.value;
+  // if still sliding
   if (distance != 0) {
-    if (currentMillis > controlMessage.duration) {
-      controlMessage.duration = currentMillis + controlMessage.period;
+    // check timing
+    if (currentMillis > controlMessage.duration) { // and duration expired
+      controlMessage.duration =
+          currentMillis + controlMessage.period; // extend duration
+      // update value
       if (distance > 0) {
         controlMessage.value += 1;
       } else {
         controlMessage.value -= 1;
       }
 
+      // send MIDI control message after ramp duration expires, on each
+      // increment
       midiSerial(176, channel, controlMessage.type, controlMessage.value);
 
+      // send out control voltage message on pin 17, PB3, digital 11
       if (controlVoltage) {
         if (distance > 0) {
           rampUp(controlLED, map(controlMessage.value, 0, 127, 0, 255), 5);
@@ -187,6 +208,7 @@ void checkNote() {
   for (int i = 0; i < polyphony; i++) {
     if (noteArray[i].velocity) {
       if (noteArray[i].duration <= currentMillis) {
+        // send noteOff for all notes with expired duration
         if (QY8) {
           midiSerial(144, noteArray[i].channel, noteArray[i].value, 0);
         } else {
@@ -196,20 +218,25 @@ void checkNote() {
         if (noteLEDs == 1)
           rampDown(i, 0, 225);
         if (noteLEDs == 2)
-          rampDown(i + 1, 0, 225);
+          rampDown(i + 1, 0, 225); // special threshold display mode
       }
     }
   }
 }
 
 void MIDIpanic() {
-  for (byte i = 1; i < 128; i++) {
-    delay(1);
-    midiSerial(144, channel, i, 0);
+  // 120 - all sound off
+  // 123 - All Notes off
+  // midiSerial(21, panicChannel, 123, 0); //123 kill all notes
 
-    if (QY8) {
+  // brute force all notes Off
+  for (byte i = 1; i < 128; i++) {
+    delay(1);                       // don't choke on note offs!
+    midiSerial(144, channel, i, 0); // clear notes on main channel
+
+    if (QY8) { // clear on all four channels
       for (byte k = 1; k < 5; k++) {
-        delay(1);
+        delay(1); // don't choke on note offs!
         midiSerial(144, k, i, 0);
       }
     }
@@ -217,38 +244,85 @@ void MIDIpanic() {
 }
 
 void midiSerial(int type, int channel, int data1, int data2) {
-  cli();
-  data1 &= 0x7F;
-  data2 &= 0x7F;
+
+  cli(); // kill interrupts, probably unnessisary
+  //  Note type = 144
+  //  Control type = 176
+  // remove MSBs on data
+  data1 &= 0x7F; // number
+  data2 &= 0x7F; // velocity
+
   byte statusbyte = (type | ((channel - 1) & 0x0F));
-  sei();
+
+  // Serial.write(statusbyte);
+  // Serial.write(data1);
+  // Serial.write(data2);
+  sei(); // enable interrupts
 }
 
 void knobMode() {
+  // scroll through menus and select values using only a single knob
+  // keep dreamin' kid,
 }
 
 void rampUp(int ledPin, int value, int time) {
   LEDFader *led = &leds[ledPin];
+  // scale the value parameter against a new maxBrightness global variable
+  //   led->fade(value, time);
   led->fade(map(value, 0, 255, 0, maxBrightness), time);
 }
 
 void rampDown(int ledPin, int value, int time) {
   LEDFader *led = &leds[ledPin];
-  led->fade(value, time);
+  // led->set_value(255); //turn on
+  led->fade(value, time); // fade out
 }
 
 void checkLED() {
+  // iterate through LED array and call update
   for (byte i = 0; i < LED_NUM; i++) {
     LEDFader *led = &leds[i];
     led->update();
   }
 }
 
+/*
+Press the button: When you press the button, currMenu is set to 1, which means you enter the menu mode.
+
+Read the knob and map the value: The code reads the knob’s position and maps that value to a menu option (for example, from 0 to 5 if you have six menu items).
+
+Turn off note LEDs: Any LEDs that were used for notes or other interactions are turned off so that only the menu-related LEDs are active.
+
+Pulse the menu LED: The LED that represents the currently selected menu item will start to pulse on and off gently, so you can see which menu option you’re on.
+*/
+
+
+/* * MENU & BUTTON LOGIC SUMMARY
+ * * 1. DEFAULT STATE (Play Mode):
+ * - currMenu = 0.
+ * - checkButton() runs constantly in void loop() but only listens.
+ * - checkMenu() is SKIPPED because (currMenu > 0) is false.
+ * - System focuses purely on plant data input.
+ * * 2. TRIGGER (Button Press 1):
+ * - checkButton() detects press -> switches currMenu to 1.
+ * - Main loop detects (currMenu > 0) -> activates checkMenu().
+ * * 3. MENU MODE (currMenu = 1):
+ * - checkMenu() runs continuously.
+ * - Reads Potentiometer -> Maps value to menu options (0-3).
+ * - Flashes LEDs to indicate selection.
+ * * 4. SELECTION (Button Press 2):
+ * - checkButton() detects press while in Menu Mode.
+ * - Enters specific sub-menu (Threshold, Scale, etc.) based on knob position.
+ */
+
+// so this fucntion basically means that when i press the button for the first time currMenu is by default 0 and if i press the button it is 0 and arduino makes it value to 1 and it is 1 and if I press the button again and turn the knob on it runs thresholdMode bcs value os 0
 void checkButton() {
-  button.update();
-  if (button.fell()) {
-    noteLEDs = 0;
-    for (byte j = 0; j < LED_NUM; j++) {
+  button.update(); // this filters out electrical noise and it takes this function from the Bounce2 library
+  if (button.fell()) { // fell means when the button was pressed
+    // Serial.println("BUTTON PRESSED "); // for debugging
+
+    noteLEDs = 0; // turning off all the leds when the button is pressed. 
+    for (byte j = 0; j < LED_NUM; j++) { // accessing all the leds in a loop 
       leds[j].stop_fade();
       leds[j].set_value(0);
     }
@@ -288,17 +362,20 @@ void checkButton() {
 }
 
 void checkMenu() {
-  static unsigned long debugTimer = 0;
+  // DEBUG: Print status every 500ms so we don't spam the screen too fast
+  static unsigned long debugTimer = 0; // unsigned long - hold a very bg number , static - it rememeber the last number whe the function was ran and do not reset to zero
 
-  value = analogRead(knobPin);
-  int rawValue = value;
+  value = analogRead(knobPin); // currnet reading value from the knob pin
+  int rawValue = value; // storing that pin value in a new variable
 
-  value = map(value, knobMin, knobMax, 0, menus);
+  // Scale knob value against number of menus
+  value = map(value, knobMin, knobMax, 0, menus); // taking the value from the knob pin and mappin it between 0 to 5
 
-  if (millis() - debugTimer > 500) {
+  if (millis() - debugTimer > 500) { // millis function will give mili seconds from the time arduino has started  
     debugTimer = millis();
   }
 
+  // Set LEDs to flash based on value
   if (value != prevValue) {
     leds[prevValue].stop_fade();
     leds[prevValue].set_value(0);
@@ -318,6 +395,7 @@ void checkMenu() {
   }
 
   if ((currentMillis - previousMillis) > menuTimeout) {
+    // Serial.println("TIMEOUT! Exiting Menu..."); // DEBUG
     currMenu = 0;
     if (maxBrightness > 1)
       noteLEDs = 1;
@@ -326,32 +404,41 @@ void checkMenu() {
   }
 }
 
-long readVcc() {
+long readVcc() { // https://code.google.com/p/tinkerit/wiki/SecretVoltmeter
   long result;
+  // Read 1.1V reference against AVcc
   ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
-  delay(2);
-  ADCSRA |= _BV(ADSC);
+  delay(2);            // Wait for Vref to settle
+  ADCSRA |= _BV(ADSC); // Convert
   while (bit_is_set(ADCSRA, ADSC))
     ;
   result = ADCL;
   result |= ADCH << 8;
-  result = 1126400L / result;
+  result = 1126400L / result; // Back-calculate AVcc in mV
   return result;
 }
 
 void checkBattery() {
+  // check battery voltage against internal 1.1v reference
+  // if below the minimum value, turn off the light show to save power
+  // don't check on every loop, settle delay in readVcc() slows things down a
+  // bit
   if (batteryCheck < currentMillis) {
-    batteryCheck = currentMillis + 10000;
+    batteryCheck = currentMillis + 10000; // reset for next battery check
 
-    if (readVcc() < batteryLimit) {
-      if (checkBat) {
+    if (readVcc() < batteryLimit) { // if voltage > valueV
+      // battery failure
+      if (checkBat) { // first battery failure
         for (byte j = 0; j < LED_NUM; j++) {
           leds[j].stop_fade();
           leds[j].set_value(0);
-        }
-        noteLEDs = 0;
-        checkBat = 0;
-      } else {
+        } // reset leds, power savings
+        noteLEDs = 0; // shut off lightshow set at noteOn event, power savings
+        checkBat = 0; // update, first battery failure identified
+      } else {        // not first low battery cycle
+        // do nothing, lights off indicates low battery
+        // MIDI continues to flow, MIDI data eventually garbles at very low
+        // voltages some USB-MIDI interfaces may crash due to garbled data
       }
     }
   }
@@ -359,62 +446,69 @@ void checkBattery() {
 
 void pulse(int ledPin, int maxValue, int time) {
   LEDFader *led = &leds[ledPin];
-  if (led->is_fading() == false) {
-    if (led->get_value() > 0) {
-      led->fade(0, time);
+  // check on the state of the LED and force it to pulse
+  if (led->is_fading() == false) { // if not fading
+    if (led->get_value() > 0) {    // and is illuminated
+      led->fade(0, time);          // fade down
     } else
-      led->fade(maxValue, time);
+      led->fade(maxValue, time); // fade up
   }
 }
 
 void bootLightshow() {
-  for (byte i = 5; i > 0; i--) {
+  for (byte i = 5; i > 0; i--) { // so basically we are running a for loop and going over every loop like 5,4,3,2,1 and than turning their brightness to 200 for 0.15 seconds and than checking while it is fading run checkLED and one by one fade every led faster
     LEDFader *led = &leds[i - 1];
+    //    led->set_value(200); //set to max
 
-    led->fade(200, 150);
+    led->fade(200, 150); // fade up
     while (led->is_fading())
       checkLED();
 
-    led->fade(0, 150 + i * 17);
+    led->fade(0, 150 + i * 17); // fade down
     while (led->is_fading())
       checkLED();
+    // move to next LED
   }
 }
 
+// provide float map function
 float mapfloat(float x, float in_min, float in_max, float out_min,
                float out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+// debug SRAM memory size
 int freeRAM() {
   extern int __heap_start, *__brkval;
   int v;
   return (int)&v - (__brkval == 0 ? (int)&__heap_start : (int)__brkval);
-}
+} // print free RAM at any point
 
 void thresholdMode() {
   int runMode = 1;
-  noteLEDs = 2;
+  noteLEDs = 2; // turn on special Note visualization for feedback on threshold effect
   while (runMode) {
+    // float knobValue
     threshold = analogRead(knobPin);
+    // set threshold to knobValue mapping
     threshold = mapfloat(threshold, knobMin, knobMax, threshMin, threshMax);
-    pulse(value, maxBrightness, (pulseRate / 2));
+    pulse(value, maxBrightness, (pulseRate / 2)); // pulse for current menu
 
     checkLED();
     if (index >= samplesize) {
       analyzeSample();
-    }
-    checkNote();
-    checkControl();
+    } // keep samples running
+    checkNote();    // turn off expired notes
+    checkControl(); // update control value
 
     button.update();
     if (button.fell())
       runMode = 0;
 
     currentMillis = millis();
-  }
-  currMenu = 0;
-  noteLEDs = 1;
+  } // after button press retain threshold setting
+  currMenu = 0; // return to main program
+  noteLEDs = 1; // normal light show
   leds[prevValue].stop_fade();
   leds[prevValue].set_value(0);
 }
@@ -424,12 +518,14 @@ void scaleMode() {
   int prevScale = 0;
   while (runMode) {
     currScale = analogRead(knobPin);
+    // set current Scale choice
     currScale = map(currScale, knobMin, knobMax, 0, scaleCount);
 
-    pulse(value, maxBrightness, (pulseRate / 2));
-    pulse(currScale, maxBrightness, (pulseRate / 4));
+    pulse(value, maxBrightness, (pulseRate / 2)); // pulse for current menu
+    pulse(currScale, maxBrightness,
+          (pulseRate / 4)); // display selected scale if scaleCount <= 5
 
-    if (currScale != prevScale) {
+    if (currScale != prevScale) { // clear last value if change
       leds[prevScale].stop_fade();
       leds[prevScale].set_value(0);
     }
@@ -438,18 +534,18 @@ void scaleMode() {
     checkLED();
     if (index >= samplesize) {
       analyzeSample();
-    }
-    checkNote();
-    checkControl();
+    } // keep samples running
+    checkNote();    // turn off expired notes
+    checkControl(); // update control value
 
     button.update();
     if (button.fell())
       runMode = 0;
 
     currentMillis = millis();
-  }
-  currMenu = 0;
-  noteLEDs = 1;
+  } // after button press retain threshold setting
+  currMenu = 0; // return to main program
+  noteLEDs = 1; // normal light show
   leds[prevValue].stop_fade();
   leds[prevValue].set_value(0);
   leds[currScale].stop_fade();
@@ -460,25 +556,26 @@ void channelMode() {
   int runMode = 1;
   while (runMode) {
     channel = analogRead(knobPin);
+    // set current MIDI Channel between 1 and 16
     channel = map(channel, knobMin, knobMax, 1, 17);
 
-    pulse(value, maxBrightness, (pulseRate / 4));
+    pulse(value, maxBrightness, (pulseRate / 4)); // pulse for current menu
 
     checkLED();
     if (index >= samplesize) {
       analyzeSample();
-    }
-    checkNote();
-    checkControl();
+    } // keep samples running
+    checkNote();    // turn off expired notes
+    checkControl(); // update control value
 
     button.update();
     if (button.fell())
       runMode = 0;
 
     currentMillis = millis();
-  }
-  currMenu = 0;
-  noteLEDs = 1;
+  } // after button press retain threshold setting
+  currMenu = 0; // return to main program
+  noteLEDs = 1; // normal light show
   leds[prevValue].stop_fade();
   leds[prevValue].set_value(0);
 }
@@ -487,47 +584,55 @@ void brightnessMode() {
   int runMode = 1;
   while (runMode) {
     maxBrightness = analogRead(knobPin);
+    // set led maxBrightness
     maxBrightness = map(maxBrightness, knobMin, knobMax, 1, 255);
 
     if (maxBrightness > 1)
-      pulse(value, maxBrightness, (pulseRate / 2));
+      pulse(value, maxBrightness, (pulseRate / 2)); // pulse for current menu
     else
-      pulse(value, 1, (pulseRate / 6));
+      pulse(value, 1, (pulseRate / 6)); // fast dim pulse for 0 note lightshow
 
     checkLED();
     if (index >= samplesize) {
       analyzeSample();
-    }
-    checkNote();
-    checkControl();
+    } // keep samples running
+    checkNote();    // turn off expired notes
+    checkControl(); // update control value
 
     button.update();
     if (button.fell())
       runMode = 0;
 
     currentMillis = millis();
-  }
-  currMenu = 0;
+  } // after button press retain threshold setting
+  currMenu = 0; // return to main program
   if (maxBrightness > 1)
-    noteLEDs = 1;
+    noteLEDs = 1; // normal light show, unles lowest value
   leds[prevValue].stop_fade();
   leds[prevValue].set_value(0);
 }
 
+// interrupt timing sample array
 void sample() {
   if (index < samplesize) {
     samples[index] = micros() - microseconds;
-    microseconds = samples[index] + microseconds;
+    microseconds =
+        samples[index] + microseconds; // rebuild micros() value w/o recalling
+    // micros() is very slow
+    // try a higher precision counter
+    // samples[index] = ((timer0_overflow_count << 8) + TCNT0) - microseconds;
     index += 1;
   }
 }
 
+// Helper to handle triggers (Sound + LED)
 void processChange(unsigned long delta, unsigned long averg, byte change) {
   if (change) {
     int dur = 150 + (map(delta % 127, 1, 127, 100, 2500));
     int ramp = 3 + (dur % 100);
     int notechannel = random(1, 5);
 
+    // Visual feedback
     if (noteLEDs > 0) {
       rampUp(random(0, LED_NUM), 255, 50);
     }
@@ -552,11 +657,12 @@ void analyzeSample() {
   float stdevi = 0;
   unsigned long delta = 0;
 
+  // FSM State Variables
   static float baseline = 0.0;
   static bool isTouched = false;
   static unsigned long touchStartTime = 0;
 
-  if (index == samplesize) {
+  if (index == samplesize) { // array is full
     unsigned long sampanalysis[analysize];
     for (byte i = 0; i < analysize; i++) {
       sampanalysis[i] = samples[i + 1];
@@ -577,38 +683,66 @@ void analyzeSample() {
     }
     delta = maxim - minim;
 
+    // *****************************************************************
+    // INDUSTRIAL SENSOR LOGIC (FSM + HYSTERESIS)
+    // *****************************************************************
+
+    // 1. Initialize Baseline instantly on startup
     if (baseline == 0) {
       baseline = delta;
     }
 
-    const float TOUCH_OFFSET = 45.0;
-    const float REL_OFFSET = 30.0;
+    // Constants for Hysteresis
+    const float TOUCH_OFFSET = 45.0; // Must be 150 above baseline to touch
+    // const float TOUCH_OFFSET = 80.0; // Must be 150 above baseline to touch
+    const float REL_OFFSET = 30.0; // Must drop to 100 above baseline to release
+    // const float REL_OFFSET = 50.0; // Must drop to 100 above baseline to release
 
+    // 2. Logic Handler
     if (!isTouched) {
+      // --- STATE: IDLE ---
+      // A. Drift Compensation: Slowly adapt baseline to environment
+      //    We ONLY update baseline when NOT touched. This prevents "learning"
+      //    the touch.
       baseline = (baseline * 0.95) + ((float)delta * 0.05);
 
+      // B. Touch Detection
+      //    Must cross the HIGH threshold (e.g. Baseline + 150)
       if (delta > (baseline + TOUCH_OFFSET)) {
         isTouched = true;
         touchStartTime = millis();
+        // Trigger LED/Sound
         processChange(delta, averg, 1);
       }
     } else {
+      // --- STATE: TOUCHED ---
+      // A. "Stuck On" Protection
+      //    If touched for > 10 seconds, assume environment changed and RESET.
       if (millis() - touchStartTime > 10000) {
         Serial.println("!!! AUTO-RESET (Stuck Protection) !!!");
-        baseline = delta;
+        baseline = delta; // Force reset to new level
         isTouched = false;
+        // Force LEDs off
         if (noteLEDs && LED_NUM > 0) {
           rampUp(0, 0, 0);
         }
       }
+
+      // B. Release Detection
+      //    Must drop below the LOW threshold (e.g. Baseline + 100)
+      //    This "Gap" (150 vs 100) is the Hysteresis that stops flickering.
       else if (delta < (baseline + REL_OFFSET)) {
         isTouched = false;
       }
     }
 
+    // *****************************************************************
+
+    // ========== ROBUST MONITORING ==========
     static unsigned long lastPrintTime = 0;
     unsigned long currentTime = millis();
 
+    // Print Status regularly
     if ((currentTime - lastPrintTime) > 100) {
       if (isTouched) {
         Serial.println("╔═══════════════════════════════════════╗");
@@ -621,12 +755,13 @@ void analyzeSample() {
       Serial.print((int)baseline);
       Serial.print(" | Thresh: >");
       if (isTouched)
-        Serial.println((int)(baseline + REL_OFFSET));
+        Serial.println((int)(baseline + REL_OFFSET)); // Show Release point
       else
-        Serial.println((int)(baseline + TOUCH_OFFSET));
+        Serial.println((int)(baseline + TOUCH_OFFSET)); // Show Touch point
 
       lastPrintTime = currentTime;
     }
+    // =======================================
 
     index = 0;
   }
@@ -640,16 +775,21 @@ int scaleSearch(int note, int scale[], int scalesize) {
       if (note < scale[i]) {
         return scale[i];
       }
-    }
+    } // highest scale value less than or equal to note
+    // otherwise continue search
   }
-  return 6;
+  // didn't find note and didn't pass note value, uh oh!
+  return 6; // give arbitrary value rather than fail
 }
 
 int scaleNote(int note, int scale[], int root) {
+  // input note mod 12 for scaling, note/12 octave
+  // search array for nearest note, return scaled*octave
   int scaled = note % 12;
   int octave = note / 12;
   int scalesize = (scale[0]);
+  // search entire array and return closest scaled note
   scaled = scaleSearch(scaled, scale, scalesize);
-  scaled = (scaled + (12 * octave)) + root;
+  scaled = (scaled + (12 * octave)) + root; // apply octave and root
   return scaled;
 }
