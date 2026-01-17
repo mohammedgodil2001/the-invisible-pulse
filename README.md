@@ -9,7 +9,7 @@ The Invisible Pulse is an interactive installation that measures the electrical 
 ## Tech Stack
 * **Hardware:** Arduino ESP32, Custom Galvanic Conductance Circuit.
 * **Software:** TouchDesigner (Visuals), Ableton Live (Sound).
-* **Technique:** Projection Mapping, Generative Algorithms.
+* **Technique:** Projection Mapping, Generative Algorithms.....
 
 
 
