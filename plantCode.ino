@@ -6,21 +6,31 @@
 #include <Bounce2.h>
 #include <LEDFader.h>
 
+int maxBrightness = 190;
+const int scaleCount = 5;
+const int scaleLen = 13;
+int currScale = 0;
+int scale[scaleCount][scaleLen] = {
+    {12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, // Chromatic
+    {7, 1, 3, 5, 6, 8, 10, 12},                  // Major
+    {7, 1, 3, 4, 6, 8, 9, 11},                   // DiaMinor
+    {7, 1, 2, 2, 5, 6, 9, 11},                   // Indian
+    {7, 1, 3, 4, 6, 8, 9, 11}                    // Minor
+};
+
+int root = 0;
+
 // Pin Definitions
-const byte interruptPin = INT1;  // Galvanometer input (555 timer)
-const byte knobPin = A0;         // Potentiometer analog input
-const byte buttonPin = A1;       // Tactile button input
+const byte interruptPin = INT1;
+const byte knobPin = A0;
+const byte buttonPin = A1;
 
 // LED Pin Array
 #define LED_NUM 6
-LEDFader leds[LED_NUM] = {LEDFader(3),  // Red
-                          LEDFader(6),  // Green
-                          LEDFader(10), // White
-                          LEDFader(5),  
-                          LEDFader(9),  
-                          LEDFader(11)};
+LEDFader leds[LED_NUM] = {LEDFader(3), LEDFader(6), LEDFader(10), 
+                          LEDFader(5), LEDFader(9), LEDFader(11)};
 int ledNums[LED_NUM] = {3, 6, 10, 5, 9, 11};
-int maxBrightness = 190;
+byte controlLED = 5;
 byte noteLEDs = 1;
 
 // Button and Menu Variables
@@ -37,11 +47,11 @@ unsigned long previousMillis = 0;
 unsigned long currentMillis = 1;
 
 // Sensor Sampling Variables
-const byte samplesize = 10;            // Sample array size
-const byte analysize = samplesize - 1; // Trim for analysis array
-volatile unsigned long microseconds;   // Sampling timer
-volatile byte index = 0;               // Current sample index
-volatile unsigned long samples[samplesize]; // Store time between pulses
+const byte samplesize = 10;
+const byte analysize = samplesize - 1;
+volatile unsigned long microseconds;
+volatile byte index = 0;
+volatile unsigned long samples[samplesize];
 
 // Threshold Variables
 float threshold = 2.5;
@@ -49,6 +59,28 @@ float threshMin = 1.61;
 float threshMax = 3.71;
 float knobMin = 1;
 float knobMax = 1024;
+
+// MIDI Variables
+const byte polyphony = 5;
+int channel = 1;
+int noteMin = 36;
+int noteMax = 96;
+byte QY8 = 0;
+byte controlNumber = 80;
+byte controlVoltage = 1;
+
+typedef struct _MIDImessage {
+  unsigned int type;
+  int value;
+  int velocity;
+  long duration;
+  long period;
+  int channel;
+} MIDImessage;
+
+MIDImessage noteArray[polyphony];
+int noteIndex = 0;
+MIDImessage controlMessage;
 
 void setup() {
   pinMode(knobPin, INPUT);
@@ -60,6 +92,8 @@ void setup() {
   randomSeed(analogRead(0));
   
   Serial.begin(115200);
+  
+  controlMessage.value = 0;
   
   Serial.println("Plant Biodata Sensor Initialized");
   
@@ -81,6 +115,8 @@ void loop() {
     analyzeSample();
   }
   
+  checkNote();
+  checkControl();
   checkLED();
   
   if (currMenu > 0)
@@ -95,14 +131,122 @@ void sample() {
   }
 }
 
+void setNote(int value, int velocity, long duration, int notechannel) {
+  for (int i = 0; i < polyphony; i++) {
+    if (!noteArray[i].velocity) {
+      noteArray[i].type = 0;
+      noteArray[i].value = value;
+      noteArray[i].velocity = velocity;
+      noteArray[i].duration = currentMillis + duration;
+      noteArray[i].channel = notechannel;
+
+      if (QY8) {
+        midiSerial(144, notechannel, value, velocity);
+      } else {
+        midiSerial(144, channel, value, velocity);
+      }
+
+      if (noteLEDs == 1) {
+        for (byte j = 0; j < (LED_NUM - 1); j++) {
+          if (!leds[j].is_fading()) {
+            rampUp(i, maxBrightness, duration);
+            break;
+          }
+        }
+      } else if (noteLEDs == 2) {
+        for (byte j = 1; j < (LED_NUM - 1); j++) {
+          if (!leds[j].is_fading()) {
+            rampUp(i, maxBrightness, duration);
+            break;
+          }
+        }
+      }
+
+      break;
+    }
+  }
+}
+
+void setControl(int type, int value, int velocity, long duration) {
+  controlMessage.type = type;
+  controlMessage.value = value;
+  controlMessage.velocity = velocity;
+  controlMessage.period = duration;
+  controlMessage.duration = currentMillis + duration;
+}
+
+void checkControl() {
+  signed int distance = controlMessage.velocity - controlMessage.value;
+  if (distance != 0) {
+    if (currentMillis > controlMessage.duration) {
+      controlMessage.duration = currentMillis + controlMessage.period;
+      
+      if (distance > 0) {
+        controlMessage.value += 1;
+      } else {
+        controlMessage.value -= 1;
+      }
+
+      midiSerial(176, channel, controlMessage.type, controlMessage.value);
+
+      if (controlVoltage) {
+        if (distance > 0) {
+          rampUp(controlLED, map(controlMessage.value, 0, 127, 0, 255), 5);
+        } else {
+          rampDown(controlLED, map(controlMessage.value, 0, 127, 0, 255), 5);
+        }
+      }
+    }
+  }
+}
+
+void checkNote() {
+  for (int i = 0; i < polyphony; i++) {
+    if (noteArray[i].velocity) {
+      if (noteArray[i].duration <= currentMillis) {
+        if (QY8) {
+          midiSerial(144, noteArray[i].channel, noteArray[i].value, 0);
+        } else {
+          midiSerial(144, channel, noteArray[i].value, 0);
+        }
+        noteArray[i].velocity = 0;
+        if (noteLEDs == 1)
+          rampDown(i, 0, 225);
+        if (noteLEDs == 2)
+          rampDown(i + 1, 0, 225);
+      }
+    }
+  }
+}
+
+void midiSerial(int type, int channel, int data1, int data2) {
+  cli();
+  data1 &= 0x7F;
+  data2 &= 0x7F;
+  byte statusbyte = (type | ((channel - 1) & 0x0F));
+  sei();
+}
+
 void processChange(unsigned long delta, unsigned long averg, byte change) {
   if (change) {
+    int dur = 150 + (map(delta % 127, 1, 127, 100, 2500));
+    int ramp = 3 + (dur % 100);
+    int notechannel = random(1, 5);
+
     if (noteLEDs > 0) {
       rampUp(random(0, LED_NUM), 255, 50);
     }
-    Serial.println("╔═══════════════════════════════════════╗");
-    Serial.println("║            TOUCH DETECTED!            ║");
-    Serial.println("╚═══════════════════════════════════════╝");
+
+    int setnote = map(averg % 127, 1, 127, noteMin, noteMax);
+    setnote = scaleNote(setnote, scale[currScale], root);
+
+    if (QY8) {
+      setNote(setnote, 100, dur, notechannel);
+    } else {
+      setNote(setnote, 100, dur, channel);
+    }
+
+    setControl(controlNumber, controlMessage.value, delta % 127, ramp);
   }
 }
 
@@ -194,6 +338,28 @@ void analyzeSample() {
 
     index = 0;
   }
+}
+
+int scaleSearch(int note, int scale[], int scalesize) {
+  for (byte i = 1; i < scalesize; i++) {
+    if (note == scale[i]) {
+      return note;
+    } else {
+      if (note < scale[i]) {
+        return scale[i];
+      }
+    }
+  }
+  return 6;
+}
+
+int scaleNote(int note, int scale[], int root) {
+  int scaled = note % 12;
+  int octave = note / 12;
+  int scalesize = (scale[0]);
+  scaled = scaleSearch(scaled, scale, scalesize);
+  scaled = (scaled + (12 * octave)) + root;
+  return scaled;
 }
 
 void checkButton() {
@@ -300,6 +466,8 @@ void thresholdMode() {
     if (index >= samplesize) {
       analyzeSample();
     }
+    checkNote();
+    checkControl();
 
     button.update();
     if (button.fell())
@@ -315,13 +483,26 @@ void thresholdMode() {
 
 void scaleMode() {
   int runMode = 1;
+  int prevScale = 0;
   while (runMode) {
+    currScale = analogRead(knobPin);
+    currScale = map(currScale, knobMin, knobMax, 0, scaleCount);
+
     pulse(value, maxBrightness, (pulseRate / 2));
+    pulse(currScale, maxBrightness, (pulseRate / 4));
+
+    if (currScale != prevScale) {
+      leds[prevScale].stop_fade();
+      leds[prevScale].set_value(0);
+    }
+    prevScale = currScale;
 
     checkLED();
     if (index >= samplesize) {
       analyzeSample();
     }
+    checkNote();
+    checkControl();
 
     button.update();
     if (button.fell())
@@ -333,17 +514,24 @@ void scaleMode() {
   noteLEDs = 1;
   leds[prevValue].stop_fade();
   leds[prevValue].set_value(0);
+  leds[currScale].stop_fade();
+  leds[currScale].set_value(0);
 }
 
 void channelMode() {
   int runMode = 1;
   while (runMode) {
+    channel = analogRead(knobPin);
+    channel = map(channel, knobMin, knobMax, 1, 17);
+
     pulse(value, maxBrightness, (pulseRate / 4));
 
     checkLED();
     if (index >= samplesize) {
       analyzeSample();
     }
+    checkNote();
+    checkControl();
 
     button.update();
     if (button.fell())
@@ -372,6 +560,8 @@ void brightnessMode() {
     if (index >= samplesize) {
       analyzeSample();
     }
+    checkNote();
+    checkControl();
 
     button.update();
     if (button.fell())
