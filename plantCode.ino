@@ -22,59 +22,81 @@ volatile unsigned long microseconds;   // Sampling timer
 volatile byte index = 0;               // Current sample index
 volatile unsigned long samples[samplesize]; // Store time between pulses
 
+// Threshold Variables
+float threshold = 2.5;
+float threshMin = 1.61;
+float threshMax = 3.71;
+
 void setup() {
-  // Initialize pin modes
   pinMode(knobPin, INPUT);
   pinMode(buttonPin, INPUT_PULLUP);
   
-  // Initialize serial communication for data output
   Serial.begin(115200);
   
   Serial.println("Plant Biodata Sensor Initialized");
   Serial.println("Waiting for sensor input...");
   
-  // Attach interrupt to capture 555 timer pulses
-  // RISING = trigger on rising edge of pulse
   attachInterrupt(interruptPin, sample, RISING);
   Serial.println("Interrupt attached - ready to capture pulses");
 }
 
 void loop() {
-  // Update current time
   currentMillis = millis();
   
-  // Check if sample array is full
   if (index >= samplesize) {
-    // For now, just reset and print status
-    Serial.print("Captured ");
-    Serial.print(samplesize);
-    Serial.println(" samples");
-    
-    // Print first few samples for debugging
-    Serial.print("Sample values: ");
-    for (byte i = 0; i < 3; i++) {
-      Serial.print(samples[i]);
-      Serial.print(" ");
-    }
-    Serial.println("...");
-    
-    // Reset index to capture new samples
-    index = 0;
+    analyzeSample();
   }
 }
 
-// Interrupt Service Routine (ISR)
-// This function is called automatically every time the 555 timer pulses
 void sample() {
-  // Only collect samples if array isn't full
   if (index < samplesize) {
-    // Calculate time since last pulse
     samples[index] = micros() - microseconds;
-    
-    // Update microseconds counter for next pulse
     microseconds = samples[index] + microseconds;
-    
-    // Move to next array position
     index += 1;
+  }
+}
+
+void analyzeSample() {
+  unsigned long averg = 0;
+  unsigned long maxim = 0;
+  unsigned long minim = 100000;
+  float stdevi = 0;
+  unsigned long delta = 0;
+
+  if (index == samplesize) {
+    unsigned long sampanalysis[analysize];
+    
+    for (byte i = 0; i < analysize; i++) {
+      sampanalysis[i] = samples[i + 1];
+      
+      if (sampanalysis[i] > maxim) {
+        maxim = sampanalysis[i];
+      }
+      if (sampanalysis[i] < minim) {
+        minim = sampanalysis[i];
+      }
+      
+      averg += sampanalysis[i];
+      stdevi += sampanalysis[i] * sampanalysis[i];
+    }
+
+    averg = averg / analysize;
+    stdevi = sqrt(stdevi / analysize - (float)averg * (float)averg);
+    
+    if (stdevi < 1) {
+      stdevi = 1.0;
+    }
+    
+    delta = maxim - minim;
+
+    // Output sensor data
+    Serial.print("Delta: ");
+    Serial.print(delta);
+    Serial.print(" | Average: ");
+    Serial.print(averg);
+    Serial.print(" | StdDev: ");
+    Serial.println(stdevi);
+
+    index = 0;
   }
 }
