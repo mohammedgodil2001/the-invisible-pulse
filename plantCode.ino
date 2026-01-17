@@ -45,6 +45,10 @@ void setup() {
   Serial.begin(115200);
   
   Serial.println("Plant Biodata Sensor Initialized");
+  
+  if (noteLEDs)
+    bootLightshow();
+  
   Serial.println("Waiting for sensor input...");
   
   attachInterrupt(interruptPin, sample, RISING);
@@ -128,4 +132,18 @@ void rampUp(int ledPin, int value, int time) {
 void rampDown(int ledPin, int value, int time) {
   LEDFader *led = &leds[ledPin];
   led->fade(value, time);
+}
+
+void bootLightshow() {
+  for (byte i = 5; i > 0; i--) {
+    LEDFader *led = &leds[i - 1];
+    
+    led->fade(200, 150);
+    while (led->is_fading())
+      checkLED();
+
+    led->fade(0, 150 + i * 17);
+    while (led->is_fading())
+      checkLED();
+  }
 }
