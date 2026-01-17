@@ -3,13 +3,24 @@
 // Interactive Projection Mapping
 // ===================================
 
+#include <LEDFader.h>
+
 // Pin Definitions
 const byte interruptPin = INT1;  // Galvanometer input (555 timer)
 const byte knobPin = A0;         // Potentiometer analog input
 const byte buttonPin = A1;       // Tactile button input
 
 // LED Pin Array
-int ledNums[6] = {3, 6, 10, 5, 9, 11};
+#define LED_NUM 6
+LEDFader leds[LED_NUM] = {LEDFader(3),  // Red
+                          LEDFader(6),  // Green
+                          LEDFader(10), // White
+                          LEDFader(5),  
+                          LEDFader(9),  
+                          LEDFader(11)};
+int ledNums[LED_NUM] = {3, 6, 10, 5, 9, 11};
+int maxBrightness = 190;
+byte noteLEDs = 1;
 
 // Timing Variables
 unsigned long previousMillis = 0;
@@ -46,6 +57,8 @@ void loop() {
   if (index >= samplesize) {
     analyzeSample();
   }
+  
+  checkLED();
 }
 
 void sample() {
@@ -89,7 +102,6 @@ void analyzeSample() {
     
     delta = maxim - minim;
 
-    // Output sensor data
     Serial.print("Delta: ");
     Serial.print(delta);
     Serial.print(" | Average: ");
@@ -99,4 +111,21 @@ void analyzeSample() {
 
     index = 0;
   }
+}
+
+void checkLED() {
+  for (byte i = 0; i < LED_NUM; i++) {
+    LEDFader *led = &leds[i];
+    led->update();
+  }
+}
+
+void rampUp(int ledPin, int value, int time) {
+  LEDFader *led = &leds[ledPin];
+  led->fade(map(value, 0, 255, 0, maxBrightness), time);
+}
+
+void rampDown(int ledPin, int value, int time) {
+  LEDFader *led = &leds[ledPin];
+  led->fade(value, time);
 }
