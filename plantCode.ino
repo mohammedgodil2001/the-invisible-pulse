@@ -3,6 +3,7 @@
 // Interactive Projection Mapping
 // ===================================
 
+#include <Bounce2.h>
 #include <LEDFader.h>
 
 // Pin Definitions
@@ -22,6 +23,15 @@ int ledNums[LED_NUM] = {3, 6, 10, 5, 9, 11};
 int maxBrightness = 190;
 byte noteLEDs = 1;
 
+// Button and Menu Variables
+Bounce button = Bounce();
+int currMenu = 0;
+int menus = 5;
+int value = 0;
+int prevValue = 0;
+int pulseRate = 350;
+unsigned long menuTimeout = 5000;
+
 // Timing Variables
 unsigned long previousMillis = 0;
 unsigned long currentMillis = 1;
@@ -37,10 +47,17 @@ volatile unsigned long samples[samplesize]; // Store time between pulses
 float threshold = 2.5;
 float threshMin = 1.61;
 float threshMax = 3.71;
+float knobMin = 1;
+float knobMax = 1024;
 
 void setup() {
   pinMode(knobPin, INPUT);
   pinMode(buttonPin, INPUT_PULLUP);
+  
+  button.attach(buttonPin);
+  button.interval(5);
+  
+  randomSeed(analogRead(0));
   
   Serial.begin(115200);
   
@@ -58,11 +75,16 @@ void setup() {
 void loop() {
   currentMillis = millis();
   
+  checkButton();
+  
   if (index >= samplesize) {
     analyzeSample();
   }
   
   checkLED();
+  
+  if (currMenu > 0)
+    checkMenu();
 }
 
 void sample() {
@@ -121,27 +143,22 @@ void analyzeSample() {
     
     delta = maxim - minim;
 
-    // Initialize baseline on startup
     if (baseline == 0) {
       baseline = delta;
     }
 
-    // Hysteresis thresholds
     const float TOUCH_OFFSET = 45.0;
     const float REL_OFFSET = 30.0;
 
     if (!isTouched) {
-      // Drift compensation
       baseline = (baseline * 0.95) + ((float)delta * 0.05);
 
-      // Touch detection
       if (delta > (baseline + TOUCH_OFFSET)) {
         isTouched = true;
         touchStartTime = millis();
         processChange(delta, averg, 1);
       }
     } else {
-      // Stuck protection
       if (millis() - touchStartTime > 10000) {
         Serial.println("!!! AUTO-RESET (Stuck Protection) !!!");
         baseline = delta;
@@ -150,13 +167,11 @@ void analyzeSample() {
           rampUp(0, 0, 0);
         }
       }
-      // Release detection
       else if (delta < (baseline + REL_OFFSET)) {
         isTouched = false;
       }
     }
 
-    // Status monitoring
     static unsigned long lastPrintTime = 0;
     if ((millis() - lastPrintTime) > 100) {
       if (isTouched) {
@@ -179,6 +194,200 @@ void analyzeSample() {
 
     index = 0;
   }
+}
+
+void checkButton() {
+  button.update();
+  if (button.fell()) {
+    noteLEDs = 0;
+    for (byte j = 0; j < LED_NUM; j++) {
+      leds[j].stop_fade();
+      leds[j].set_value(0);
+    }
+
+    switch (currMenu) {
+    case 0:
+      prevValue = 0;
+      currMenu = 1;
+      previousMillis = currentMillis;
+      break;
+    case 1:
+      switch (value) {
+      case 0:
+        thresholdMode();
+        return;
+        break;
+      case 1:
+        scaleMode();
+        return;
+        break;
+      case 2:
+        channelMode();
+        return;
+        break;
+      case 3:
+        brightnessMode();
+        return;
+        break;
+      default:
+        break;
+      }
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+void checkMenu() {
+  static unsigned long debugTimer = 0;
+
+  value = analogRead(knobPin);
+  int rawValue = value;
+
+  value = map(value, knobMin, knobMax, 0, menus);
+
+  if (millis() - debugTimer > 500) {
+    debugTimer = millis();
+  }
+
+  if (value != prevValue) {
+    leds[prevValue].stop_fade();
+    leds[prevValue].set_value(0);
+    prevValue = value;
+    previousMillis = currentMillis;
+  }
+
+  switch (currMenu) {
+  case 1:
+    noteLEDs = 0;
+    pulse(value, maxBrightness, pulseRate);
+    break;
+  case 2:
+    noteLEDs = 0;
+    pulse(value, maxBrightness, (pulseRate / 2));
+    break;
+  }
+
+  if ((currentMillis - previousMillis) > menuTimeout) {
+    currMenu = 0;
+    if (maxBrightness > 1)
+      noteLEDs = 1;
+    leds[prevValue].stop_fade();
+    leds[prevValue].set_value(0);
+  }
+}
+
+void pulse(int ledPin, int maxValue, int time) {
+  LEDFader *led = &leds[ledPin];
+  if (led->is_fading() == false) {
+    if (led->get_value() > 0) {
+      led->fade(0, time);
+    } else
+      led->fade(maxValue, time);
+  }
+}
+
+void thresholdMode() {
+  int runMode = 1;
+  noteLEDs = 2;
+  while (runMode) {
+    threshold = analogRead(knobPin);
+    threshold = mapfloat(threshold, knobMin, knobMax, threshMin, threshMax);
+    pulse(value, maxBrightness, (pulseRate / 2));
+
+    checkLED();
+    if (index >= samplesize) {
+      analyzeSample();
+    }
+
+    button.update();
+    if (button.fell())
+      runMode = 0;
+
+    currentMillis = millis();
+  }
+  currMenu = 0;
+  noteLEDs = 1;
+  leds[prevValue].stop_fade();
+  leds[prevValue].set_value(0);
+}
+
+void scaleMode() {
+  int runMode = 1;
+  while (runMode) {
+    pulse(value, maxBrightness, (pulseRate / 2));
+
+    checkLED();
+    if (index >= samplesize) {
+      analyzeSample();
+    }
+
+    button.update();
+    if (button.fell())
+      runMode = 0;
+
+    currentMillis = millis();
+  }
+  currMenu = 0;
+  noteLEDs = 1;
+  leds[prevValue].stop_fade();
+  leds[prevValue].set_value(0);
+}
+
+void channelMode() {
+  int runMode = 1;
+  while (runMode) {
+    pulse(value, maxBrightness, (pulseRate / 4));
+
+    checkLED();
+    if (index >= samplesize) {
+      analyzeSample();
+    }
+
+    button.update();
+    if (button.fell())
+      runMode = 0;
+
+    currentMillis = millis();
+  }
+  currMenu = 0;
+  noteLEDs = 1;
+  leds[prevValue].stop_fade();
+  leds[prevValue].set_value(0);
+}
+
+void brightnessMode() {
+  int runMode = 1;
+  while (runMode) {
+    maxBrightness = analogRead(knobPin);
+    maxBrightness = map(maxBrightness, knobMin, knobMax, 1, 255);
+
+    if (maxBrightness > 1)
+      pulse(value, maxBrightness, (pulseRate / 2));
+    else
+      pulse(value, 1, (pulseRate / 6));
+
+    checkLED();
+    if (index >= samplesize) {
+      analyzeSample();
+    }
+
+    button.update();
+    if (button.fell())
+      runMode = 0;
+
+    currentMillis = millis();
+  }
+  currMenu = 0;
+  if (maxBrightness > 1)
+    noteLEDs = 1;
+  leds[prevValue].stop_fade();
+  leds[prevValue].set_value(0);
+}
+
+float mapfloat(float x, float in_min, float in_max, float out_min, float out_max) {
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
 void checkLED() {
