@@ -736,32 +736,31 @@ void analyzeSample() {
       }
     }
 
-    // *****************************************************************
-
-    // ========== ROBUST MONITORING ==========
+   
     static unsigned long lastPrintTime = 0;
     unsigned long currentTime = millis();
 
     // Print Status regularly
-    if ((currentTime - lastPrintTime) > 100) {
-      if (isTouched) {
-        Serial.println("╔═══════════════════════════════════════╗");
-        Serial.println("║            TOUCHED!                   ║");
-        Serial.println("╚═══════════════════════════════════════╝");
-      }
-      Serial.print("Delta: ");
-      Serial.print(delta);
-      Serial.print(" | Base: ");
-      Serial.print((int)baseline);
-      Serial.print(" | Thresh: >");
-      if (isTouched)
-        Serial.println((int)(baseline + REL_OFFSET)); // Show Release point
-      else
-        Serial.println((int)(baseline + TOUCH_OFFSET)); // Show Touch point
+    // if ((currentTime - lastPrintTime) > 100) {
+    //   if (isTouched) {
+    //     Serial.println("╔═══════════════════════════════════════╗");
+    //     Serial.println("║            TOUCHED!                   ║");
+    //     Serial.println("╚═══════════════════════════════════════╝");
+    //   }
+    //   Serial.print("Delta: ");
+    //   Serial.print(delta);
+    //   Serial.print(" | Base: ");
+    //   Serial.print((int)baseline);
+    //   Serial.print(" | Thresh: >");
+    //   if (isTouched)
+    //     Serial.println((int)(baseline + REL_OFFSET)); // Show Release point
+    //   else
+    //     Serial.println((int)(baseline + TOUCH_OFFSET)); // Show Touch point
 
-      lastPrintTime = currentTime;
-    }
-    // =======================================
+    //   lastPrintTime = currentTime;
+    // }
+    
+    Serial.println(delta); 
 
     index = 0;
   }
