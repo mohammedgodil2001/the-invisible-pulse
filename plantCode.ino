@@ -243,22 +243,60 @@ void MIDIpanic() {
   }
 }
 
+// void midiSerial(int type, int channel, int data1, int data2) {
+
+//   cli(); // kill interrupts, probably unnessisary
+//   //  Note type = 144
+//   //  Control type = 176
+//   // remove MSBs on data
+//   data1 &= 0x7F; // number
+//   data2 &= 0x7F; // velocity
+
+//   byte statusbyte = (type | ((channel - 1) & 0x0F));
+
+//   // Serial.write(statusbyte);
+//   // Serial.write(data1);
+//   // Serial.write(data2);
+//   sei(); // enable interrupts
+// }
+
+
+static int lastNote = -1;
+static int lastVelocity = -1;
+
 void midiSerial(int type, int channel, int data1, int data2) {
-
-  cli(); // kill interrupts, probably unnessisary
-  //  Note type = 144
-  //  Control type = 176
-  // remove MSBs on data
-  data1 &= 0x7F; // number
-  data2 &= 0x7F; // velocity
-
-  byte statusbyte = (type | ((channel - 1) & 0x0F));
-
-  // Serial.write(statusbyte);
-  // Serial.write(data1);
-  // Serial.write(data2);
-  sei(); // enable interrupts
+  // Only process Note On/Off messages (144)
+  // if (type == 144) {
+    if (type == 144 || type == 128) {
+    
+    // Force valid MIDI range
+    data1 &= 0x7F;  // Note number 0-127
+    data2 &= 0x7F;  // Velocity 0-127
+    
+    // Only send if note OR velocity actually changed
+    if (data1 != lastNote || data2 != lastVelocity) {
+      
+      Serial.print("M,");
+      Serial.print(data1);      // Note number
+      Serial.print(",");
+      Serial.print(data2);      // Velocity
+      Serial.print(",");
+      Serial.println(channel);  // Channel
+      
+      // Remember last values
+      lastNote = data1;
+      lastVelocity = data2;
+    }
+  }
 }
+
+
+
+
+
+
+
+
 
 void knobMode() {
   // scroll through menus and select values using only a single knob
@@ -650,6 +688,288 @@ void processChange(unsigned long delta, unsigned long averg, byte change) {
   }
 }
 
+
+// original
+// void analyzeSample() {
+//   unsigned long averg = 0;
+//   unsigned long maxim = 0;
+//   unsigned long minim = 100000;
+//   float stdevi = 0;
+//   unsigned long delta = 0;
+
+//   // FSM State Variables
+//   static float baseline = 0.0;
+//   static bool isTouched = false;
+//   static unsigned long touchStartTime = 0;
+
+//   if (index == samplesize) { // array is full
+//     unsigned long sampanalysis[analysize];
+//     for (byte i = 0; i < analysize; i++) {
+//       sampanalysis[i] = samples[i + 1];
+//       if (sampanalysis[i] > maxim) {
+//         maxim = sampanalysis[i];
+//       }
+//       if (sampanalysis[i] < minim) {
+//         minim = sampanalysis[i];
+//       }
+//       averg += sampanalysis[i];
+//       stdevi += sampanalysis[i] * sampanalysis[i];
+//     }
+
+//     averg = averg / analysize;
+//     stdevi = sqrt(stdevi / analysize - (float)averg * (float)averg);
+//     if (stdevi < 1) {
+//       stdevi = 1.0;
+//     }
+//     delta = maxim - minim;
+
+    
+
+//     // 1. Initialize Baseline instantly on startup
+//     if (baseline == 0) {
+//       baseline = delta;
+//     }
+
+//     const float TOUCH_OFFSET = 150.0; // 45
+//     const float REL_OFFSET = 80.0;  // 30
+
+//     // 2. Logic Handler
+//     if (!isTouched) {
+//       baseline = (baseline * 0.95) + ((float)delta * 0.05);
+
+//       if (delta > (baseline + TOUCH_OFFSET)) {
+//         isTouched = true;
+//         touchStartTime = millis();
+//         // Trigger LED/Sound
+//         processChange(delta, averg, 1);
+//       }
+//     } else {
+
+
+//       if (millis() - touchStartTime > 10000) {
+//         baseline = delta; 
+//         isTouched = false;
+//         if (noteLEDs && LED_NUM > 0) {
+//           rampUp(0, 0, 0);
+//         }
+//       }
+
+      
+//       else if (delta < (baseline + REL_OFFSET)) {
+//         isTouched = false;
+//       }
+//     }
+
+    
+//     // static unsigned long lastPrintTime = 0;
+//     // unsigned long currentTime = millis();
+//     // if ((currentTime - lastPrintTime) > 100) {
+//     //   if (isTouched) {
+//     //     Serial.println("╔═══════════════════════════════════════╗");
+//     //     Serial.println("║            TOUCHED!                   ║");
+//     //     Serial.println("╚═══════════════════════════════════════╝");
+//     //   }
+//     //   Serial.print("Delta: ");
+//     //   Serial.print(delta);
+//     //   Serial.print(" | Base: ");
+//     //   Serial.print((int)baseline);
+//     //   Serial.print(" | Thresh: >");
+//     //   if (isTouched)
+//     //     Serial.println((int)(baseline + REL_OFFSET)); // Show Release point
+//     //   else
+//     //     Serial.println((int)(baseline + TOUCH_OFFSET)); // Show Touch point
+
+//     //   lastPrintTime = currentTime;
+//     // }
+
+
+//     static unsigned long lastMidiSend = 0;
+//     if (millis() - lastMidiSend > 50) {  // Adjust interval as needed
+//       // processChange(delta, averg, 1);
+//       lastMidiSend = millis();
+//     }
+    
+    
+
+    
+    
+
+//     Serial.print("D,");
+//     Serial.println(delta);
+
+
+
+   
+
+
+
+//   //  static unsigned long lastSend = 0;
+//   //   if (millis() - lastSend > 50) {  // Limit speed to every 50ms
+       
+//   //      // 1. VISUALS (Send "D" for TouchDesigner)
+//   //      Serial.print("D,");
+//   //      Serial.println(delta);
+
+//   //      // 2. MUSIC (Calculate Perfect Note and send "P" for VCV Rack)
+//   //      int myNote = map(averg % 127, 1, 127, noteMin, noteMax); 
+//   //      myNote = scaleNote(myNote, scale[currScale], root); 
+
+//   //      Serial.print("P,");
+//   //      Serial.println(myNote);
+
+//   //      // 3. LEDS (Keep flashing lights)
+//   //     //  processChange(delta, averg, 1);
+       
+//   //      lastSend = millis();
+//   //   }
+
+
+
+
+//     index = 0;
+//   }
+// }
+
+
+
+// calude - first 
+// void analyzeSample() {
+//   unsigned long averg = 0;
+//   unsigned long maxim = 0;
+//   unsigned long minim = 100000;
+//   float stdevi = 0;
+//   unsigned long delta = 0;
+
+//   static float baseline = 0.0;
+//   static bool isTouched = false;
+//   static unsigned long touchStartTime = 0;
+
+//   if (index == samplesize) {
+//     unsigned long sampanalysis[analysize];
+//     for (byte i = 0; i < analysize; i++) {
+//       sampanalysis[i] = samples[i + 1];
+//       if (sampanalysis[i] > maxim) maxim = sampanalysis[i];
+//       if (sampanalysis[i] < minim) minim = sampanalysis[i];
+//       averg += sampanalysis[i];
+//       stdevi += sampanalysis[i] * sampanalysis[i];
+//     }
+
+//     averg = averg / analysize;
+//     stdevi = sqrt(stdevi / analysize - (float)averg * (float)averg);
+//     if (stdevi < 1) stdevi = 1.0;
+//     delta = maxim - minim;
+
+//     if (baseline == 0) {
+//       baseline = delta;
+//     }
+
+//     const float TOUCH_OFFSET = 150.0;
+//     const float REL_OFFSET = 80.0;
+
+//     // ============================================
+//     // TOUCH DETECTION
+//     // ============================================
+//     if (!isTouched) {
+//       baseline = (baseline * 0.95) + ((float)delta * 0.05);
+      
+//       if (delta > (baseline + TOUCH_OFFSET)) {
+//         isTouched = true;
+//         touchStartTime = millis();
+//         Serial.println(">>> TOUCH STARTED <<<");
+//       }
+//     } else {
+//       if (millis() - touchStartTime > 10000) {
+//         baseline = delta;
+//         isTouched = false;
+        
+//         // Turn off LEDs
+//         for (byte i = 0; i < LED_NUM - 1; i++) {
+//           leds[i].stop_fade();
+//           leds[i].set_value(0);
+//         }
+        
+//         Serial.println(">>> AUTO-RELEASE <<<");
+//       }
+//       else if (delta < (baseline + REL_OFFSET)) {
+//         isTouched = false;
+        
+//         // Turn off LEDs
+//         for (byte i = 0; i < LED_NUM - 1; i++) {
+//           leds[i].stop_fade();
+//           leds[i].set_value(0);
+//         }
+        
+//         Serial.println(">>> TOUCH RELEASED <<<");
+//       }
+//     }
+
+//     // ============================================
+//     // MUSIC GENERATION (With Proper Timing!)
+//     // ============================================
+//     byte change = 0;
+    
+//     if (isTouched) {
+//         if (delta > 100) {
+//             change = 1;
+//         }
+//     } else {
+//         if (delta > (stdevi * threshold)) {
+//             change = 1;
+//         }
+//     }
+
+//     // *** KEY FIX: Only generate notes at reasonable intervals ***
+//     static unsigned long lastNoteTime = 0;
+    
+//     if (change && (millis() - lastNoteTime > 200)) {  // Minimum 200ms between notes
+//         lastNoteTime = millis();
+        
+//         // int duration = 150 + (map(delta % 127, 1, 127, 100, 1500));  // Shorter max duration
+//         int duration = 800 + (map(delta % 127, 1, 127, 500, 2000));  // 800-2800ms
+//         int ramp = 3 + (duration % 100);
+//         int notechannel = random(1, 5);
+        
+//         int setnote = map(averg % 127, 1, 127, noteMin, noteMax);
+//         setnote = scaleNote(setnote, scale[currScale], root);
+
+//         int velocity;
+//         if (isTouched) {
+//             velocity = 127;
+            
+//             // LEDs when touched
+//             if (noteLEDs > 0) {
+//                 rampUp(random(0, LED_NUM - 1), 255, 30);
+//             }
+//         } else {
+//             velocity = 60;
+//         }
+
+//         // Play note
+//         if (QY8) {
+//             setNote(setnote, velocity, duration, notechannel);
+//         } else {
+//             setNote(setnote, velocity, duration, channel);
+//         }
+        
+//         setControl(controlNumber, controlMessage.value, delta % 127, ramp);
+//     }
+
+//     // ============================================
+//     // DATA STREAMING (Every 50ms)
+//     // ============================================
+//     static unsigned long lastStream = 0;
+//     if (millis() - lastStream > 50) {
+//        Serial.print("D,");
+//        Serial.println(delta);
+//        lastStream = millis();
+//     }
+
+//     index = 0;
+//   }
+// }
+
+
+// claude second
 void analyzeSample() {
   unsigned long averg = 0;
   unsigned long maxim = 0;
@@ -657,114 +977,126 @@ void analyzeSample() {
   float stdevi = 0;
   unsigned long delta = 0;
 
-  // FSM State Variables
   static float baseline = 0.0;
   static bool isTouched = false;
   static unsigned long touchStartTime = 0;
 
-  if (index == samplesize) { // array is full
+  if (index == samplesize) {
     unsigned long sampanalysis[analysize];
     for (byte i = 0; i < analysize; i++) {
       sampanalysis[i] = samples[i + 1];
-      if (sampanalysis[i] > maxim) {
-        maxim = sampanalysis[i];
-      }
-      if (sampanalysis[i] < minim) {
-        minim = sampanalysis[i];
-      }
+      if (sampanalysis[i] > maxim) maxim = sampanalysis[i];
+      if (sampanalysis[i] < minim) minim = sampanalysis[i];
       averg += sampanalysis[i];
       stdevi += sampanalysis[i] * sampanalysis[i];
     }
 
     averg = averg / analysize;
     stdevi = sqrt(stdevi / analysize - (float)averg * (float)averg);
-    if (stdevi < 1) {
-      stdevi = 1.0;
-    }
+    if (stdevi < 1) stdevi = 1.0;
     delta = maxim - minim;
 
-    // *****************************************************************
-    // INDUSTRIAL SENSOR LOGIC (FSM + HYSTERESIS)
-    // *****************************************************************
-
-    // 1. Initialize Baseline instantly on startup
     if (baseline == 0) {
       baseline = delta;
     }
 
-    // Constants for Hysteresis
-    const float TOUCH_OFFSET = 45.0; // Must be 150 above baseline to touch
-    // const float TOUCH_OFFSET = 80.0; // Must be 150 above baseline to touch
-    const float REL_OFFSET = 30.0; // Must drop to 100 above baseline to release
-    // const float REL_OFFSET = 50.0; // Must drop to 100 above baseline to release
+    const float TOUCH_OFFSET = 150.0;
+    const float REL_OFFSET = 80.0;
 
-    // 2. Logic Handler
+    // ============================================
+    // TOUCH DETECTION
+    // ============================================
     if (!isTouched) {
-      // --- STATE: IDLE ---
-      // A. Drift Compensation: Slowly adapt baseline to environment
-      //    We ONLY update baseline when NOT touched. This prevents "learning"
-      //    the touch.
       baseline = (baseline * 0.95) + ((float)delta * 0.05);
-
-      // B. Touch Detection
-      //    Must cross the HIGH threshold (e.g. Baseline + 150)
+      
       if (delta > (baseline + TOUCH_OFFSET)) {
         isTouched = true;
         touchStartTime = millis();
-        // Trigger LED/Sound
-        processChange(delta, averg, 1);
+        Serial.println(">>> TOUCH STARTED <<<");
       }
     } else {
-      // --- STATE: TOUCHED ---
-      // A. "Stuck On" Protection
-      //    If touched for > 10 seconds, assume environment changed and RESET.
       if (millis() - touchStartTime > 10000) {
-        Serial.println("!!! AUTO-RESET (Stuck Protection) !!!");
-        baseline = delta; // Force reset to new level
+        baseline = delta;
         isTouched = false;
-        // Force LEDs off
-        if (noteLEDs && LED_NUM > 0) {
-          rampUp(0, 0, 0);
+        
+        for (byte i = 0; i < LED_NUM - 1; i++) {
+          leds[i].stop_fade();
+          leds[i].set_value(0);
         }
+        
+        Serial.println(">>> AUTO-RELEASE <<<");
       }
-
-      // B. Release Detection
-      //    Must drop below the LOW threshold (e.g. Baseline + 100)
-      //    This "Gap" (150 vs 100) is the Hysteresis that stops flickering.
       else if (delta < (baseline + REL_OFFSET)) {
         isTouched = false;
+        
+        for (byte i = 0; i < LED_NUM - 1; i++) {
+          leds[i].stop_fade();
+          leds[i].set_value(0);
+        }
+        
+        Serial.println(">>> TOUCH RELEASED <<<");
       }
     }
 
-   
-    static unsigned long lastPrintTime = 0;
-    unsigned long currentTime = millis();
-
-    // Print Status regularly
-    // if ((currentTime - lastPrintTime) > 100) {
-    //   if (isTouched) {
-    //     Serial.println("╔═══════════════════════════════════════╗");
-    //     Serial.println("║            TOUCHED!                   ║");
-    //     Serial.println("╚═══════════════════════════════════════╝");
-    //   }
-    //   Serial.print("Delta: ");
-    //   Serial.print(delta);
-    //   Serial.print(" | Base: ");
-    //   Serial.print((int)baseline);
-    //   Serial.print(" | Thresh: >");
-    //   if (isTouched)
-    //     Serial.println((int)(baseline + REL_OFFSET)); // Show Release point
-    //   else
-    //     Serial.println((int)(baseline + TOUCH_OFFSET)); // Show Touch point
-
-    //   lastPrintTime = currentTime;
-    // }
+    // ============================================
+    // MUSIC GENERATION (Like Original!)
+    // ============================================
+    byte change = 0;
     
-    Serial.println(delta); 
+    if (isTouched) {
+        if (delta > 100) {
+            change = 1;
+        }
+    } else {
+        if (delta > (stdevi * threshold)) {
+            change = 1;
+        }
+    }
+
+    // *** REMOVED TIMING RESTRICTION - Just like original! ***
+    if (change) {
+        int duration = 150 + (map(delta % 127, 1, 127, 100, 2500));
+        int ramp = 3 + (duration % 100);
+        int notechannel = random(1, 5);
+        
+        int setnote = map(averg % 127, 1, 127, noteMin, noteMax);
+        setnote = scaleNote(setnote, scale[currScale], root);
+
+        int velocity;
+        if (isTouched) {
+            velocity = 127;
+            
+            if (noteLEDs > 0) {
+                rampUp(random(0, LED_NUM - 1), 255, 30);
+            }
+        } else {
+            velocity = 60;
+        }
+
+        // Play note - polyphony system handles overlaps!
+        if (QY8) {
+            setNote(setnote, velocity, duration, notechannel);
+        } else {
+            setNote(setnote, velocity, duration, channel);
+        }
+        
+        setControl(controlNumber, controlMessage.value, delta % 127, ramp);
+    }
+
+    // ============================================
+    // DATA STREAMING
+    // ============================================
+    static unsigned long lastStream = 0;
+    if (millis() - lastStream > 50) {
+       Serial.print("D,");
+       Serial.println(delta);
+       lastStream = millis();
+    }
 
     index = 0;
   }
 }
+
 
 int scaleSearch(int note, int scale[], int scalesize) {
   for (byte i = 1; i < scalesize; i++) {
