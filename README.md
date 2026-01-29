@@ -11,7 +11,7 @@ When a visitor touches the plant, changes in electrical conductivity are capture
 The project explores the relationship between living systems and digital media, using plants as a metaphor for how biological life is often overlooked. A future extension of the project introduces the Growth Receipt—a printed souvenir that turns a moment of interaction into a lasting reminder to care for living systems.
 
 ## Full process and documentation:
-https://www.notion.so/Week-4-2bbcbbd76593800081efc750e7f1538c?source=copy_link
+https://www.notion.so/2bbcbbd76593800081efc750e7f1538c
 
 
 
